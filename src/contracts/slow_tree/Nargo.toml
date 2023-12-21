@@ -1,0 +1,10 @@
+[package]
+name = "slow_tree_contract"
+authors = [""]
+compiler_version = ">=0.16.0"
+type = "contract"
+
+[dependencies]
+aztec =             { git="https://github.com/AztecProtocol/aztec-packages/", tag="aztec-packages-v0.16.9", directory="yarn-project/aztec-nr/aztec" }
+value_note =        { git="https://github.com/AztecProtocol/aztec-packages/", tag="aztec-packages-v0.16.9", directory="yarn-project/aztec-nr/value-note"}
+slow_updates_tree = { git="https://github.com/AztecProtocol/aztec-packages/", tag="aztec-packages-v0.16.9", directory="yarn-project/aztec-nr/slow-updates-tree"}
