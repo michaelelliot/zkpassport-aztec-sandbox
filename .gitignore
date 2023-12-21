@@ -1,0 +1,10 @@
+.DS_Store
+/.vscode
+/cache
+/res
+/node_modules
+/src/interfaces
+tsconfig.tsbuildinfo
+yarn-error.log
+yarn.lock
+target
