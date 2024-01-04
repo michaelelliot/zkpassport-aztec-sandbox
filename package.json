@@ -40,11 +40,11 @@
     "typescript": "^5.3.3"
   },
   "dependencies": {
-    "@aztec/aztec.js": "^0.16.7",
-    "@aztec/bb.js": "^0.16.7",
-    "@aztec/merkle-tree": "^0.16.7",
-    "@aztec/noir-contracts": "^0.16.7",
-    "@aztec/types": "^0.16.7",
+    "@aztec/aztec.js": "0.16.9",
+    "@aztec/bb.js": "0.16.9",
+    "@aztec/merkle-tree": "0.16.9",
+    "@aztec/noir-contracts": "0.16.9",
+    "@aztec/types": "0.16.9",
     "leveldown": "^6.1.1",
     "levelup": "^5.1.1",
     "memdown": "^6.1.1"
