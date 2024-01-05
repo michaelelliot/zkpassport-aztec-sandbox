@@ -4,8 +4,8 @@ function compile_contract() {
     mkdir -p src/interfaces
     aztec-cli compile -ts target src/contracts/$1 && \
     mv src/contracts/$1/target/*.{json,ts} src/interfaces/ && \
-    rm -d src/contracts/$1/target
-    mkdir -p cache/compiled
+    rm -d src/contracts/$1/target && \
+    mkdir -p cache/compiled && \
     touch "./cache/compiled/$2"
 }
 
