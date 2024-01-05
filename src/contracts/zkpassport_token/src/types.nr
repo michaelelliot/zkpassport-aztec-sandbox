@@ -4,3 +4,4 @@ mod balances_map;
 mod token_note;
 mod safe_u120_serialization;
 mod roles;
+mod profile_note;

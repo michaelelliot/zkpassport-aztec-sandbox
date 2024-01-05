@@ -176,6 +176,20 @@ describe('zkPassport Aztec Sandbox', () => {
       )
     }, 60_000)
 
+    describe.only('register_passport', () => {
+      it('register_passport', async () => {
+        const tx = asset.methods.register_passport(1234n, 5678n).send()
+        const receipt = await tx.wait()
+        expect(receipt.status).toBe(TxStatus.MINED)
+      })
+      it('check_passport', async () => {
+        // const tx = asset.methods.check_passport(accounts[0].address).send()
+        const tx = asset.methods.check_passport().send()
+        const receipt = await tx.wait()
+        expect(receipt.status).toBe(TxStatus.MINED)
+      })
+    })
+
     describe('thresholds', () => {
       describe('set thresholds', () => {
         it('sets threshold1 to 250', async () => {

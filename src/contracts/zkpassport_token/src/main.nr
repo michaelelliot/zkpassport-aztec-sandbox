@@ -18,7 +18,7 @@ contract zkPassportToken {
         },
         context::{PrivateContext, PublicContext, Context},
         hash::{compute_secret_hash},
-        state_vars::{map::Map, public_state::PublicState, set::Set, immutable_singleton::ImmutableSingleton},
+        state_vars::{map::Map, public_state::PublicState, set::Set, immutable_singleton::ImmutableSingleton, singleton::Singleton},
         types::type_serialization::{
             field_serialization::{FieldSerializationMethods, FIELD_SERIALIZED_LEN},
             bool_serialization::{BoolSerializationMethods, BOOL_SERIALIZED_LEN},
@@ -39,6 +39,7 @@ contract zkPassportToken {
         token_note::{TokenNote, TokenNoteMethods, TOKEN_NOTE_LEN},
         balances_map::{BalancesMap},
         safe_u120_serialization::{SafeU120SerializationMethods, SAFE_U120_SERIALIZED_LEN},
+        profile_note::{ProfileNote, ProfileNoteMethods, PROFILE_NOTE_LEN},
         roles::UserFlags,
     };
     use crate::interfaces::SlowMap;
@@ -54,6 +55,7 @@ contract zkPassportToken {
         threshold_limit_1: PublicState<SafeU120, SAFE_U120_SERIALIZED_LEN>,
         threshold_limit_2: PublicState<SafeU120, SAFE_U120_SERIALIZED_LEN>,
         threshold_limit_3: PublicState<SafeU120, SAFE_U120_SERIALIZED_LEN>,
+        profiles: Map<Singleton<ProfileNote, PROFILE_NOTE_LEN>>,
     }
 
     impl Storage {
@@ -102,6 +104,13 @@ contract zkPassportToken {
                     context,
                     11,
                     SafeU120SerializationMethods,
+                ),
+                profiles: Map::new(
+                    context,
+                    12,
+                    |context, slot| {
+                        Singleton::new(context, slot, ProfileNoteMethods)
+                    },
                 ),
             }
         }
@@ -191,6 +200,24 @@ contract zkPassportToken {
         slow.update_at_private(&mut context, THRESHOLD_3_KEY, threshold);
         let selector = compute_selector("_set_threshold_3(Field)");
         context.call_public_function(context.this_address(), selector, [threshold]);
+    }
+
+    #[aztec(private)]
+    fn register_passport(name: Field, country: Field) {
+        let account = AztecAddress::new(context.msg_sender());
+        debug_log_format("register_passport: name={0}, country={1}, account.address: {3}", [name, country, account.address]);
+        let mut profile = ProfileNote::new(name, country, Option::some(account));
+        // let mut profile = ProfileNote::new(name, country, Option::some(account.address));
+        storage.profiles.at(account.address).initialize(&mut profile, Option::none(), true);
+    }
+
+    #[aztec(private)]
+    fn check_passport() {
+        let account = AztecAddress::new(context.msg_sender());
+        debug_log_format("check_passport: account.address={0}", [account.address]);
+        let profile = storage.profiles.at(account.address).get_note(true);
+        // let profile = storage.profiles.at(account.address).get_note(false); // dont broadcast
+        debug_log_format("check_passport: profile.country: {0}", [profile.country]);
     }
 
     #[aztec(public)]
