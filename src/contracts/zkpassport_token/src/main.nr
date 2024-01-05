@@ -205,7 +205,7 @@ contract zkPassportToken {
     #[aztec(private)]
     fn register_passport(name: Field, country: Field) {
         let account = AztecAddress::new(context.msg_sender());
-        debug_log_format("register_passport: name={0}, country={1}, account.address: {3}", [name, country, account.address]);
+        debug_log_format("register_passport: name={0}, country={1}, account.address: {2}", [name, country, account.address]);
         let mut profile = ProfileNote::new(name, country, Option::some(account));
         // let mut profile = ProfileNote::new(name, country, Option::some(account.address));
         storage.profiles.at(account.address).initialize(&mut profile, Option::none(), true);
