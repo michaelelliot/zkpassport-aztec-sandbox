@@ -1,5 +1,7 @@
 #!/usr/bin/env sh
 
+set -e
+
 if [ -z "$SKIP_COMPILE" ]; then
     ./scripts/compile.sh
 fi
