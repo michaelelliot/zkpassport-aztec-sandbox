@@ -15,12 +15,12 @@ limits over a given time period (e.g. monthly), and country whitelisting.
 npm install
 ```
 
-### Ensure Aztec Sandbox is running
+### Ensure Aztec Sandbox version 0.16.9 is running
 
 In a separate terminal:
 
 ```bash
-cd ~/.aztec && docker-compose up
+cd ~/.aztec && DEBUG=aztec:simulator:oracle SANDBOX_VERSION=0.16.9 docker compose up
 ```
 
 ### Run tests
