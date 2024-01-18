@@ -12,8 +12,14 @@ function compile_contract() {
 }
 
 function compile_contract_if_changed() {
-    local change_hash="$(find src/contracts/$1 -type f \( -name "*.nr" -o -name "*.toml" \) -exec shasum -a 256 {} \; | shasum -a 256 | tr -cd 'a-zA-Z0-9')"
-    if [ ! -f "./cache/compiled/$change_hash" ]; then
+    if command -v shasum >/dev/null 2>&1; then
+        local change_hash="$(find src/contracts/$1 -type f \( -name "*.nr" -o -name "*.toml" \) -exec shasum -a 256 {} \; | shasum -a 256 | tr -cd 'a-zA-Z0-9')"
+        if [ ! -f "./cache/compiled/$change_hash" ]; then
+            echo "Compiling $1..."
+            compile_contract "$1" "$change_hash"
+        fi
+    else
+        echo "Note: shasum not found. Always compiling contracts regardless of when they were last updated."
         echo "Compiling $1..."
         compile_contract "$1" "$change_hash"
     fi

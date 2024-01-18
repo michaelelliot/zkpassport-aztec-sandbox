@@ -22,7 +22,6 @@ export class TokenSimulator {
     const fromBalance = this.balancePublic.get(from) || 0n
     this.balancePublic.set(from, fromBalance - amount)
     expect(fromBalance).toBeGreaterThanOrEqual(amount)
-
     const toBalance = this.balancePublic.get(to) || 0n
     this.balancePublic.set(to, toBalance + amount)
   }
@@ -59,7 +58,6 @@ export class TokenSimulator {
     const fromBalance = this.balancesPrivate.get(from) || 0n
     expect(fromBalance).toBeGreaterThanOrEqual(amount)
     this.balancesPrivate.set(from, fromBalance - amount)
-
     this.totalSupply -= amount
   }
 
@@ -67,7 +65,6 @@ export class TokenSimulator {
     const fromBalance = this.balancePublic.get(from) || 0n
     expect(fromBalance).toBeGreaterThanOrEqual(amount)
     this.balancePublic.set(from, fromBalance - amount)
-
     this.totalSupply -= amount
   }
 
@@ -81,7 +78,6 @@ export class TokenSimulator {
 
   public async check() {
     expect(await this.token.methods.total_supply().view()).toEqual(this.totalSupply)
-
     // Check that all our public matches
     for (const address of this.accounts) {
       expect(await this.token.methods.balance_of_public({ address }).view()).toEqual(this.balanceOfPublic(address))

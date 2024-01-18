@@ -1,0 +1,9 @@
+[package]
+name = "zkpassport"
+authors = ["@michaelelliot"]
+type = "lib"
+compiler_version = ">=0.16.0"
+
+[dependencies]
+biguint = { path = "../rsa-biguint" }
+sha1 = { tag = "v0.0.5", git = "https://github.com/michaelelliot/noir-sha1", directory = "crates/noir-sha1" }

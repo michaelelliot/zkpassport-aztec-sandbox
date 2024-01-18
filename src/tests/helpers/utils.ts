@@ -74,3 +74,7 @@ export const getUpdateCapsule = (proof: {
     ...proof.after.sibling_path,
   ]
 }
+
+export const fmt = (num: number | bigint) => {
+  return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '_')
+}

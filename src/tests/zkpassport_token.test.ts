@@ -20,24 +20,35 @@ import { jest } from '@jest/globals'
 import { default as levelup } from 'levelup'
 import { Pedersen, SparseTree, newTree } from '@aztec/merkle-tree'
 import { TokenSimulator } from './helpers/token_simulator.ts'
-import { createLevelDown, getContractAddress, getMembershipCapsule, getMembershipProof, getUpdateCapsule, getUpdateProof, updateContractAddress } from './helpers/utils.ts'
-// @ts-ignore
+import { createLevelDown, fmt, getContractAddress, getMembershipCapsule, getMembershipProof, getUpdateCapsule, getUpdateProof, updateContractAddress } from './helpers/utils.ts'
 import { zkPassportTokenContract as TokenContract } from '../interfaces/zkPassportToken.ts'
-// @ts-ignore
 import { SlowTreeContract } from '../interfaces/SlowTree.ts'
+import { johnny_capsule_data, johnny_capsule_data_active_auth } from './fixtures/johnny.ts'
+
+type CapsuleItemType = Fr[] | number[] | number | bigint[] | bigint
+type CapsuleType = CapsuleItemType[]
 
 const { PXE_URL = 'http://localhost:8080', ETHEREUM_HOST = 'http://localhost:8545' } = process.env
 const logger = createDebugLogger('token')
 
+// Transfer thresholds
+const THRESHOLD_1 = 250n
+const THRESHOLD_2 = 1_000n
+const THRESHOLD_3 = 100_000n
+
+// These keys are the index used for their respective storage in the slow update tree
 const THRESHOLD_1_KEY = 9001n
 const THRESHOLD_2_KEY = 9002n
 const THRESHOLD_3_KEY = 9003n
+const ALLOWED_CERT_PUBKEYS_MTREE_ROOT_KEY = 8001n
+const ALLOWED_COUNTRIES_MTREE_ROOT_KEY = 8002n
+
 const BLACKLIST_FLAG  = 1n
 const MINTER_FLAG     = 2n
 const ADMIN_FLAG      = 4n
 const TIMEOUT         = 90_000
 
-describe('zkPassport Aztec Sandbox', () => {
+describe('zkPassport Aztec Sandbox Prototype', () => {
   jest.setTimeout(TIMEOUT)
 
   let wallets: AccountWallet[]
@@ -62,7 +73,7 @@ describe('zkPassport Aztec Sandbox', () => {
   const setThreshold1 = async (threshold: bigint) => {
     await updateSlowTree(slowUpdateTreeSimulator, wallets[0], THRESHOLD_1_KEY, threshold)
     await asset.methods.set_threshold_1(threshold).send().wait()
-    logger(`Set threshold1 to ${threshold}`)
+    logger(`Set threshold1 to ${fmt(threshold)}`)
     // Progress to next "epoch"
     await cheatCodes.aztec.warp((await cheatCodes.eth.timestamp()) + 200)
     await slowUpdateTreeSimulator.commit()
@@ -70,7 +81,7 @@ describe('zkPassport Aztec Sandbox', () => {
   const setThreshold2 = async (threshold: bigint) => {
     await updateSlowTree(slowUpdateTreeSimulator, wallets[0], THRESHOLD_2_KEY, threshold)
     await asset.methods.set_threshold_2(threshold).send().wait()
-    logger(`Set threshold2 to ${threshold}`)
+    logger(`Set threshold2 to ${fmt(threshold)}`)
     // Progress to next "epoch"
     await cheatCodes.aztec.warp((await cheatCodes.eth.timestamp()) + 200)
     await slowUpdateTreeSimulator.commit()
@@ -78,18 +89,53 @@ describe('zkPassport Aztec Sandbox', () => {
   const setThreshold3 = async (threshold: bigint) => {
     await updateSlowTree(slowUpdateTreeSimulator, wallets[0], THRESHOLD_3_KEY, threshold)
     await asset.methods.set_threshold_3(threshold).send().wait()
-    logger(`Set threshold3 to ${threshold}`)
+    logger(`Set threshold3 to ${fmt(threshold)}`)
     // Progress to next "epoch"
     await cheatCodes.aztec.warp((await cheatCodes.eth.timestamp()) + 200)
     await slowUpdateTreeSimulator.commit()
   }
 
+  const setAllowedCountriesMerkleRoot = async (root: bigint) => {
+    await updateSlowTree(slowUpdateTreeSimulator, wallets[0], ALLOWED_COUNTRIES_MTREE_ROOT_KEY, root)
+    await asset.methods.set_allowed_countries_mtree_root(root).send().wait()
+    logger(`Set allowed_countries_mtree_root to ${root}`)
+    // Progress to next "epoch"
+    await cheatCodes.aztec.warp((await cheatCodes.eth.timestamp()) + 200)
+    await slowUpdateTreeSimulator.commit()
+  }
+
+  const setAllowedCertPubKeysMerkleRoot = async (root: bigint) => {
+    await updateSlowTree(slowUpdateTreeSimulator, wallets[0], ALLOWED_CERT_PUBKEYS_MTREE_ROOT_KEY, root)
+    await asset.methods.set_allowed_cert_pubkeys_mtree_root(root).send().wait()
+    logger(`Set allowed_cert_pubkeys_mtree_root to ${root}`)
+    // Progress to next "epoch"
+    await cheatCodes.aztec.warp((await cheatCodes.eth.timestamp()) + 200)
+    await slowUpdateTreeSimulator.commit()
+  }
+
+  const addCapsules = async (wallet: AccountWallet, capsules: CapsuleType) => {
+    for (let i = capsules.length - 1; i >= 0; i--) {
+      const capsuleItem = capsules[i]
+      let capsuleToAdd: Fr[]
+      if (Array.isArray(capsuleItem)) {
+        capsuleToAdd = capsuleItem.map(item => {
+          if (typeof item === 'number' || typeof item === 'bigint') {
+            return new Fr(item)
+          } else return item
+        })
+      } else {
+        if (typeof capsuleItem === 'number' || typeof capsuleItem === 'bigint') {
+          capsuleToAdd = [new Fr(capsuleItem)]
+        } else capsuleToAdd = [capsuleItem]
+      }
+      await wallet.addCapsule(capsuleToAdd)
+    }
+  }
+
   beforeAll(async () => {
     pxe = createPXEClient(PXE_URL)
     await waitForSandbox(pxe)
-
     cheatCodes = CheatCodes.create(ETHEREUM_HOST, pxe)
-
     const depth = 254
     slowUpdateTreeSimulator = await newTree(SparseTree, levelup(createLevelDown('./cache/slow_tree')), new Pedersen(), 'test', depth)
     // slowUpdateTreeSimulator = await newTree(SparseTree, levelup(createMemDown()), new Pedersen(), 'test', depth)
@@ -98,7 +144,7 @@ describe('zkPassport Aztec Sandbox', () => {
   let slowTreeAddress = getContractAddress('slowTree')
   let tokenAddress = getContractAddress('token')
 
-  describe('token contract', () => {
+  describe('Token contract', () => {
     let alice: AccountWallet
     let bob: AccountWallet
     let token: TokenContract
@@ -108,7 +154,6 @@ describe('zkPassport Aztec Sandbox', () => {
     beforeAll(async () => {
       accounts = await pxe.getRegisteredAccounts()
       wallets = await getSandboxAccountsWallets(pxe)
-
       alice = wallets[0]
       bob = wallets[0]
       logger(`Loaded Alice's account at ${alice.getAddress().toShortString()}`)
@@ -123,7 +168,6 @@ describe('zkPassport Aztec Sandbox', () => {
         logger(`Using existing Token contract at address ${token.address}`)
         asset = token
       }
-
       if (!slowTreeAddress) {
         slowTree = await SlowTreeContract.deploy(wallets[0]).send().deployed()
         logger(`Contract SlowTree successfully deployed at address ${slowTree.address}`)
@@ -140,7 +184,6 @@ describe('zkPassport Aztec Sandbox', () => {
           // Add the note
           const note = new Note([slowTree.address.toField()])
           const storageSlot = new Fr(7)
-
           for (const wallet of wallets) {
             const extendedNote = new ExtendedNote(
               note,
@@ -151,12 +194,10 @@ describe('zkPassport Aztec Sandbox', () => {
             )
             await wallet.addNote(extendedNote)
           }
-
           // account[0] is set as admin and minter initially
           await updateSlowTree(slowUpdateTreeSimulator, wallets[0], accounts[0].address.toBigInt(), ADMIN_FLAG + MINTER_FLAG)
           await asset.methods.init_slow_tree(accounts[0].address).send().wait()
           logger('SlowTree initialised')
-
           // Progress to next "epoch"
           const time = await cheatCodes.eth.timestamp()
           await cheatCodes.aztec.warp(time + 200)
@@ -168,7 +209,6 @@ describe('zkPassport Aztec Sandbox', () => {
           expect(roleLeaf['after']).toEqual(ADMIN_FLAG + MINTER_FLAG)
         }
       }
-
       tokenSim = new TokenSimulator(
         token as any,
         logger,
@@ -176,49 +216,82 @@ describe('zkPassport Aztec Sandbox', () => {
       )
     }, 60_000)
 
-    describe('thresholds', () => {
-      describe('set thresholds', () => {
-        it('sets threshold1 to 250', async () => {
-          const threshold1 = 250n
+    describe('Thresholds', () => {
+      describe('Set thresholds', () => {
+        it(`sets threshold1 to ${fmt(THRESHOLD_1)}`, async () => {
+          const threshold1 = THRESHOLD_1
           await setThreshold1(threshold1)
-          const leafValue = await slowTree.methods
-            .un_read_leaf_at(asset.address, AztecAddress.fromBigInt(THRESHOLD_1_KEY))
-            .view()
+          const leafValue = await slowTree.methods.un_read_leaf_at(asset.address, AztecAddress.fromBigInt(THRESHOLD_1_KEY)).view()
           expect(leafValue['after']).toEqual(threshold1)
         })
-        it('sets threshold2 to 1_000', async () => {
-          const threshold2 = 1_000n
+        it(`sets threshold2 to ${fmt(THRESHOLD_2)}`, async () => {
+          const threshold2 = THRESHOLD_2
           await setThreshold2(threshold2)
-          const leafValue = await slowTree.methods
-            .un_read_leaf_at(asset.address, AztecAddress.fromBigInt(THRESHOLD_2_KEY))
-            .view()
+          const leafValue = await slowTree.methods.un_read_leaf_at(asset.address, AztecAddress.fromBigInt(THRESHOLD_2_KEY)).view()
           expect(leafValue['after']).toEqual(threshold2)
         })
-        it('sets threshold3 to 100_000', async () => {
-          const threshold3 = 100_000n
+        it(`sets threshold3 to ${fmt(THRESHOLD_3)}`, async () => {
+          const threshold3 = THRESHOLD_3
           await setThreshold3(threshold3)
-          const leafValue = await slowTree.methods
-            .un_read_leaf_at(asset.address, AztecAddress.fromBigInt(THRESHOLD_3_KEY))
-            .view()
+          const leafValue = await slowTree.methods.un_read_leaf_at(asset.address, AztecAddress.fromBigInt(THRESHOLD_3_KEY)).view()
           expect(leafValue['after']).toEqual(threshold3)
         })
       })
 
-      describe('check thresholds', () => {
-        it('checks thresholds are correct', async () => {
+      describe('Get thresholds', () => {
+        it(`checks threshold1 is ${fmt(THRESHOLD_1)}`, async () => {
           const threshold1 = await asset.methods.threshold_limit_1().view()
-          logger(`threshold1: ${threshold1}`)
+          expect(threshold1).toEqual(THRESHOLD_1)
+        })
+        it(`checks threshold2 is ${fmt(THRESHOLD_2)}`, async () => {
           const threshold2 = await asset.methods.threshold_limit_2().view()
-          logger(`threshold2: ${threshold2}`)
+          expect(threshold2).toEqual(THRESHOLD_2)
+        })
+        it(`checks threshold3 is ${fmt(THRESHOLD_3)}`, async () => {
           const threshold3 = await asset.methods.threshold_limit_3().view()
-          logger(`threshold3: ${threshold3}`)
+          expect(threshold3).toEqual(THRESHOLD_3)
         })
       })
     })
 
-    describe('updatable transfer threshold using slow tree', () => {
+    describe('Merkle trees', () => {
+      it('set allowed countries merkle root', async () => {
+        const root = 0x0dd9d5b6db78ee2e4e93254bb7707af58f75bf50706c7ea9ba904c8a9fe506e5n
+        await setAllowedCountriesMerkleRoot(root)
+        const leafValue = await slowTree.methods.un_read_leaf_at(asset.address, AztecAddress.fromBigInt(ALLOWED_COUNTRIES_MTREE_ROOT_KEY)).view()
+        expect(leafValue['after']).toEqual(root)
+      })
+      it('set allowed certificate public keys merkle root', async () => {
+        const root = 0x1281be6251b0c14f70d42165ee9a26c45685b9a151e0e79336191bb8fb560b19n
+        await setAllowedCertPubKeysMerkleRoot(root)
+        const leafValue = await slowTree.methods.un_read_leaf_at(asset.address, AztecAddress.fromBigInt(ALLOWED_CERT_PUBKEYS_MTREE_ROOT_KEY)).view()
+        expect(leafValue['after']).toEqual(root)
+      })
+    })
+
+    describe('Verify passport', () => {
+      it('verify passport with proof of country', async () => {
+        await addCapsules(wallets[0], johnny_capsule_data)
+        await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, ALLOWED_COUNTRIES_MTREE_ROOT_KEY, true)))
+        await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, ALLOWED_CERT_PUBKEYS_MTREE_ROOT_KEY, true)))
+        const tx = asset.methods.verify_passport(false).send()
+        const receipt = await tx.wait()
+        expect(receipt.status).toBe(TxStatus.MINED)
+      })
+
+      it('verify passport with proof of country and active auth', async () => {
+        await addCapsules(wallets[0], johnny_capsule_data_active_auth)
+        await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, ALLOWED_COUNTRIES_MTREE_ROOT_KEY, true)))
+        await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, ALLOWED_CERT_PUBKEYS_MTREE_ROOT_KEY, true)))
+        const tx = asset.methods.verify_passport(true).send()
+        const receipt = await tx.wait()
+        expect(receipt.status).toBe(TxStatus.MINED)
+      })
+    })
+
+    describe('Mint and reedem tokens', () => {
       const secret = Fr.random()
-      const mintAmount = 10_000n
+      const mintAmount = 1_000_000n
       let secretHash: Fr
       let txHash: TxHash
 
@@ -226,15 +299,15 @@ describe('zkPassport Aztec Sandbox', () => {
         secretHash = computeMessageSecretHash(secret)
       })
 
-      it('mints 10_000 tokens to pending shield', async () => {
+      it('mints 1_000_000 tokens to pending shield', async () => {
         const tx = asset.methods.mint_private(mintAmount, secretHash).send()
         const receipt = await tx.wait()
         expect(receipt.status).toBe(TxStatus.MINED)
         tokenSim.mintPrivate(mintAmount)
         txHash = receipt.txHash
-      }, 60_000)
+      })
 
-      it('redeems pending shield', async () => {
+      it('redeems 1_000_000 from pending shield', async () => {
         await addPendingShieldNoteToPXE(0, mintAmount, secretHash, txHash)
         await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, accounts[0].address.toBigInt(), true)))
         const txClaim = asset.methods.redeem_shield(accounts[0].address, mintAmount, secret).send()
@@ -245,26 +318,25 @@ describe('zkPassport Aztec Sandbox', () => {
         const { visibleNotes } = receiptClaim.debugInfo!
         expect(visibleNotes.length).toBe(1)
         expect(visibleNotes[0].note.items[0].toBigInt()).toBe(mintAmount)
-      }, 60_000)
+      })
+    })
 
+    describe('Token transfers', () => {
       it('sets threshold1 to 250', async () => {
         const threshold1 = 250n
         await setThreshold1(threshold1)
-        const leafValue = await slowTree.methods
-          .un_read_leaf_at(asset.address, AztecAddress.fromBigInt(THRESHOLD_1_KEY))
-          .view()
+        const leafValue = await slowTree.methods.un_read_leaf_at(asset.address, AztecAddress.fromBigInt(THRESHOLD_1_KEY)).view()
         expect(leafValue['after']).toEqual(threshold1)
-      }, 60_000)
+      })
 
       it('checks threshold1 is 250', async () => {
         const threshold = await asset.methods.threshold_limit_1().view()
         expect(threshold).toEqual(250n)
       })
 
-      it('successfully transfers 249 tokens', async () => {
+      it('successfully transfers 249 tokens (without verification)', async () => {
         const balance = await asset.methods.balance_of_private(accounts[0].address).view()
         logger(`Balance: ${balance}`)
-
         const amount = 249n
         logger(`Transferring ${amount} tokens...`)
 
@@ -278,29 +350,82 @@ describe('zkPassport Aztec Sandbox', () => {
         const receipt = await tx.wait()
         expect(receipt.status).toBe(TxStatus.MINED)
         tokenSim.transferPrivate(accounts[0].address, accounts[1].address, amount)
-      }, 60_000)
+      })
 
-      it('fails to transfer 250 tokens', async () => {
+      it('fails to transfer 250 tokens (without verification)', async () => {
         const amount = 250n
         logger(`Transferring ${amount} tokens...`)
+
         await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, accounts[1].address.toBigInt(), true)))
         await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, accounts[0].address.toBigInt(), true)))
         await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, THRESHOLD_1_KEY, true)))
 
         const call = asset.methods.transfer(accounts[0].address, accounts[1].address, amount, 0)
         await expect(call.simulate()).rejects.toThrowError(/Threshold amount exceeded/)
-      }, 60_000)
+      })
+
+      it('successfully transfers 250 tokens (with country verification)', async () => {
+        const balance = await asset.methods.balance_of_private(accounts[0].address).view()
+        logger(`Balance: ${balance}`)
+        const amount = 500n
+        logger(`Transferring ${amount} tokens...`)
+
+        await addCapsules(wallets[0], johnny_capsule_data)
+        await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, ALLOWED_COUNTRIES_MTREE_ROOT_KEY, true)))
+        await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, ALLOWED_CERT_PUBKEYS_MTREE_ROOT_KEY, true)))
+        // Note: Capsules are REVERSE ORDER to how they're consumed in a function!
+        // await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, accounts[1].address.toBigInt(), true)))
+        // await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, accounts[0].address.toBigInt(), true)))
+        await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, THRESHOLD_2_KEY, true)))
+
+        const tx = asset.methods.transfer_up_to_threshold_2(accounts[0].address, accounts[1].address, amount, 0).send()
+        const receipt = await tx.wait()
+        expect(receipt.status).toBe(TxStatus.MINED)
+        tokenSim.transferPrivate(accounts[0].address, accounts[1].address, amount)
+      })
+
+      it('fails to transfer 50_000 tokens (with country verification)', async () => {
+        const amount = 50_000n
+        logger(`Transferring ${amount} tokens...`)
+
+        await addCapsules(wallets[0], johnny_capsule_data)
+        await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, ALLOWED_COUNTRIES_MTREE_ROOT_KEY, true)))
+        await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, ALLOWED_CERT_PUBKEYS_MTREE_ROOT_KEY, true)))
+        // await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, accounts[1].address.toBigInt(), true)))
+        // await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, accounts[0].address.toBigInt(), true)))
+        await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, THRESHOLD_2_KEY, true)))
+
+        const call = asset.methods.transfer_up_to_threshold_2(accounts[0].address, accounts[1].address, amount, 0)
+        await expect(call.simulate()).rejects.toThrowError(/Threshold amount exceeded/)
+      })
+
+      it('successfully transfers 50_000 tokens (with country verification and active auth)', async () => {
+        const balance = await asset.methods.balance_of_private(accounts[0].address).view()
+        logger(`Balance: ${balance}`)
+        const amount = 50_000n
+        logger(`Transferring ${amount} tokens...`)
+
+        await addCapsules(wallets[0], johnny_capsule_data_active_auth)
+        await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, ALLOWED_COUNTRIES_MTREE_ROOT_KEY, true)))
+        await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, ALLOWED_CERT_PUBKEYS_MTREE_ROOT_KEY, true)))
+        // await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, accounts[1].address.toBigInt(), true)))
+        // await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, accounts[0].address.toBigInt(), true)))
+        await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, THRESHOLD_3_KEY, true)))
+
+        const tx = asset.methods.transfer_up_to_threshold_3(accounts[0].address, accounts[1].address, amount, 0).send()
+        const receipt = await tx.wait()
+        expect(receipt.status).toBe(TxStatus.MINED)
+        tokenSim.transferPrivate(accounts[0].address, accounts[1].address, amount)
+      })
 
       it('sets threshold1 to 500', async () => {
         const threshold1 = 500n
         await setThreshold1(threshold1)
-        const leafValue = await slowTree.methods
-          .un_read_leaf_at(asset.address, AztecAddress.fromBigInt(THRESHOLD_1_KEY))
-          .view()
+        const leafValue = await slowTree.methods.un_read_leaf_at(asset.address, AztecAddress.fromBigInt(THRESHOLD_1_KEY)).view()
         expect(leafValue['after']).toEqual(threshold1)
-      }, 60_000)
+      })
 
-      it('now successfully transfers 250 tokens', async () => {
+      it('successfully transfers 250 tokens (without verification)', async () => {
         const amount = 250n
         logger(`Transferring ${amount} tokens...`)
         await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, accounts[1].address.toBigInt(), true)))
@@ -311,39 +436,7 @@ describe('zkPassport Aztec Sandbox', () => {
         const receipt = await tx.wait()
         expect(receipt.status).toBe(TxStatus.MINED)
         tokenSim.transferPrivate(accounts[0].address, accounts[1].address, amount)
-      }, 60_000)
-    })
-
-    describe('transfer up to threshold2', () => {
-      it('successfully transfers 500 tokens', async () => {
-        const balance = await asset.methods.balance_of_private(accounts[0].address).view()
-        logger(`Balance: ${balance}`)
-
-        const amount = 500n
-        logger(`Transferring ${amount} tokens...`)
-
-        // Note: Capsules are REVERSE ORDER to how they're consumed in a function!
-        await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, accounts[1].address.toBigInt(), true)))
-        await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, accounts[0].address.toBigInt(), true)))
-        await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, THRESHOLD_2_KEY, true)))
-
-        const tx = asset.methods.transfer_up_to_threshold_2(accounts[0].address, accounts[1].address, amount, 0).send()
-        const receipt = await tx.wait()
-        expect(receipt.status).toBe(TxStatus.MINED)
-        // tokenSim.transferPrivate(accounts[0].address, accounts[1].address, amount)
-      }, 60_000)
-
-      it('fails to transfer 5_000 tokens', async () => {
-        const amount = 5_000n
-        logger(`Transferring ${amount} tokens...`)
-        await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, accounts[1].address.toBigInt(), true)))
-        await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, accounts[0].address.toBigInt(), true)))
-        await wallets[0].addCapsule(getMembershipCapsule(await getMembershipProof(slowUpdateTreeSimulator, THRESHOLD_2_KEY, true)))
-
-        const call = asset.methods.transfer_up_to_threshold_2(accounts[0].address, accounts[1].address, amount, 0)
-        await expect(call.simulate()).rejects.toThrowError(/Threshold amount exceeded/)
       })
     })
-    
   })
 })

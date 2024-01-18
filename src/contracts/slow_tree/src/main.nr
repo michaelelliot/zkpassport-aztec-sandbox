@@ -80,7 +80,7 @@ contract SlowTree {
     fn read_at(index: Field) -> Field {
         let fields = pop_capsule();
         let p: MembershipProof<TREE_HEIGHT, MEMBERSHIP_SIZE> = deserialize_membership_proof(fields);
-        assert(index == p.index, "Index does not match expected");
+        assert(index == p.index, "Index does not match expected. Are your capsules in the correct order?");
 
         let expected_root = compute_merkle_root(p.value, p.index, p.sibling_path);
         let selector = compute_selector("_assert_current_root(Field,Field)");

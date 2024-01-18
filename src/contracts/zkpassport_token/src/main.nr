@@ -1,11 +1,23 @@
+mod capsule;
 mod types;
 mod interfaces;
 mod utils;
+mod actions;
+mod globals;
 
 contract zkPassportToken {
-    global THRESHOLD_1_KEY: Field = 9001;
-    global THRESHOLD_2_KEY: Field = 9002;
-    global THRESHOLD_3_KEY: Field = 9003;
+    use crate::globals::{
+        THRESHOLD_1_KEY,
+        THRESHOLD_2_KEY,
+        THRESHOLD_3_KEY,
+        ALLOWED_CERT_PUBKEYS_MTREE_ROOT_KEY,
+        ALLOWED_COUNTRIES_MTREE_ROOT_KEY,
+    };
+
+    use crate::actions;
+    use crate::utils::{ arr_copy_field_to_u8, pop_capsule_u8_array, pop_capsule_u16_array, pop_capsule_single, pop_capsule_field_array };
+    use crate::capsule::pop_capsule;
+    use dep::zkpassport::verify_zkpassport_country;
 
     use dep::aztec::oracle::debug_log::{ debug_log, debug_log_format };
     use dep::std::option::Option;
@@ -16,18 +28,18 @@ contract zkPassportToken {
             note_header::NoteHeader,
             utils as note_utils,
         },
-        context::{PrivateContext, PublicContext, Context},
-        hash::{compute_secret_hash},
-        state_vars::{map::Map, public_state::PublicState, set::Set, immutable_singleton::ImmutableSingleton},
+        context::{ PrivateContext, PublicContext, Context },
+        hash::{ compute_secret_hash },
+        state_vars::{ map::Map, public_state::PublicState, set::Set, immutable_singleton::ImmutableSingleton },
         types::type_serialization::{
-            field_serialization::{FieldSerializationMethods, FIELD_SERIALIZED_LEN},
-            bool_serialization::{BoolSerializationMethods, BOOL_SERIALIZED_LEN},
-            aztec_address_serialization::{AztecAddressSerializationMethods, AZTEC_ADDRESS_SERIALIZED_LEN},
+            field_serialization::{ FieldSerializationMethods, FIELD_SERIALIZED_LEN },
+            bool_serialization::{ BoolSerializationMethods, BOOL_SERIALIZED_LEN },
+            aztec_address_serialization::{ AztecAddressSerializationMethods, AZTEC_ADDRESS_SERIALIZED_LEN },
         },
-        types::address::{AztecAddress},
+        types::address::{ AztecAddress },
         selector::compute_selector,
     };
-    use dep::field_note::field_note::{FieldNote, FieldNoteMethods, FIELD_NOTE_LEN};
+    use dep::field_note::field_note::{ FieldNote, FieldNoteMethods, FIELD_NOTE_LEN };
     use dep::authwit::{
         auth::{
             assert_current_call_valid_authwit,
@@ -35,10 +47,10 @@ contract zkPassportToken {
         },
     };
     use crate::types::{
-        transparent_note::{TransparentNote, TransparentNoteMethods, TRANSPARENT_NOTE_LEN},
-        token_note::{TokenNote, TokenNoteMethods, TOKEN_NOTE_LEN},
-        balances_map::{BalancesMap},
-        safe_u120_serialization::{SafeU120SerializationMethods, SAFE_U120_SERIALIZED_LEN},
+        transparent_note::{ TransparentNote, TransparentNoteMethods, TRANSPARENT_NOTE_LEN },
+        token_note::{ TokenNote, TokenNoteMethods, TOKEN_NOTE_LEN },
+        balances_map::{ BalancesMap },
+        safe_u120_serialization::{ SafeU120SerializationMethods, SAFE_U120_SERIALIZED_LEN },
         roles::UserFlags,
     };
     use crate::interfaces::SlowMap;
@@ -54,6 +66,8 @@ contract zkPassportToken {
         threshold_limit_1: PublicState<SafeU120, SAFE_U120_SERIALIZED_LEN>,
         threshold_limit_2: PublicState<SafeU120, SAFE_U120_SERIALIZED_LEN>,
         threshold_limit_3: PublicState<SafeU120, SAFE_U120_SERIALIZED_LEN>,
+        allowed_countries_mtree_root: PublicState<Field, FIELD_SERIALIZED_LEN>,
+        allowed_cert_pubkeys_mtree_root: PublicState<Field, FIELD_SERIALIZED_LEN>,
     }
 
     impl Storage {
@@ -103,6 +117,16 @@ contract zkPassportToken {
                     11,
                     SafeU120SerializationMethods,
                 ),
+                allowed_countries_mtree_root: PublicState::new(
+                    context,
+                    12,
+                    FieldSerializationMethods,
+                ),
+                allowed_cert_pubkeys_mtree_root: PublicState::new(
+                    context,
+                    13,
+                    FieldSerializationMethods,
+                ),
             }
         }
     }
@@ -146,6 +170,36 @@ contract zkPassportToken {
         let caller_roles = UserFlags::new(slow.read_at(&mut context, context.msg_sender()) as u120);
         assert(caller_roles.is_admin, "caller is not admin");
         slow.update_at_private(&mut context, user.address, roles);
+    }
+
+    // Only to be called from set_allowed_countries_mtree_root
+    #[aztec(public)]
+    internal fn _set_allowed_countries_mtree_root(root: Field) {
+        debug_log_format("_set_allowed_countries_mtree_root (public): {0}", [root]);
+        storage.allowed_countries_mtree_root.write(root);
+    }
+    #[aztec(private)]
+    fn set_allowed_countries_mtree_root(root: Field) {
+        debug_log_format("set_allowed_countries_mtree_root: {0}", [root as Field]);
+        let slow = SlowMap::at(AztecAddress::new(storage.slow_update.get_note().value));
+        slow.update_at_private(&mut context, ALLOWED_COUNTRIES_MTREE_ROOT_KEY, root);
+        let selector = compute_selector("_set_allowed_countries_mtree_root(Field)");
+        context.call_public_function(context.this_address(), selector, [root]);
+    }
+
+    // Only to be called from set_allowed_cert_pubkeys_mtree_root
+    #[aztec(public)]
+    internal fn _set_allowed_cert_pubkeys_mtree_root(root: Field) {
+        debug_log_format("_set_allowed_cert_pubkeys_mtree_root (public): {0}", [root]);
+        storage.allowed_cert_pubkeys_mtree_root.write(root);
+    }
+    #[aztec(private)]
+    fn set_allowed_cert_pubkeys_mtree_root(root: Field) {
+        debug_log_format("set_allowed_cert_pubkeys_mtree_root: {0}", [root as Field]);
+        let slow = SlowMap::at(AztecAddress::new(storage.slow_update.get_note().value));
+        slow.update_at_private(&mut context, ALLOWED_CERT_PUBKEYS_MTREE_ROOT_KEY, root);
+        let selector = compute_selector("_set_allowed_cert_pubkeys_mtree_root(Field)");
+        context.call_public_function(context.this_address(), selector, [root]);
     }
 
     // Only to be called from set_threshold_1
@@ -193,22 +247,33 @@ contract zkPassportToken {
         context.call_public_function(context.this_address(), selector, [threshold]);
     }
 
-    #[aztec(public)]
-    fn mint_public(to: AztecAddress, amount: Field) {
-        let slow = SlowMap::at(storage.public_slow_update.read());
-        let to_roles = UserFlags::new(slow.read_at_pub(context, to.address) as u120);
-        assert(!to_roles.is_blacklisted, "Blacklisted: Recipient");
+    #[aztec(private)]
+    fn verify_passport(active_auth: bool) {
+        let slow = SlowMap::at(AztecAddress::new(storage.slow_update.get_note().value));
+        let allowed_cert_pubkeys_mtree_root = slow.read_at(&mut context, ALLOWED_CERT_PUBKEYS_MTREE_ROOT_KEY) as Field;
+        debug_log_format("verify_passport() allowed_cert_pubkeys_mtree_root={0}", [allowed_cert_pubkeys_mtree_root]);
+        let allowed_countries_mtree_root = slow.read_at(&mut context, ALLOWED_COUNTRIES_MTREE_ROOT_KEY) as Field;
+        debug_log_format("verify_passport() allowed_countries_mtree_root={0}", [allowed_countries_mtree_root]);
 
-        let caller_roles = UserFlags::new(slow.read_at_pub(context, context.msg_sender()) as u120);
-        assert(caller_roles.is_minter, "caller is not minter");
-
-        let amount = SafeU120::new(amount);
-        let new_balance = storage.public_balances.at(to.address).read().add(amount);
-        let supply = storage.total_supply.read().add(amount);
-
-        storage.public_balances.at(to.address).write(new_balance);
-        storage.total_supply.write(supply);
+        actions::verify_passport(context, allowed_cert_pubkeys_mtree_root, allowed_countries_mtree_root, active_auth);
     }
+
+    // #[aztec(public)]
+    // fn mint_public(to: AztecAddress, amount: Field) {
+    //     let slow = SlowMap::at(storage.public_slow_update.read());
+    //     let to_roles = UserFlags::new(slow.read_at_pub(context, to.address) as u120);
+    //     assert(!to_roles.is_blacklisted, "Blacklisted: Recipient");
+
+    //     let caller_roles = UserFlags::new(slow.read_at_pub(context, context.msg_sender()) as u120);
+    //     assert(caller_roles.is_minter, "caller is not minter");
+
+    //     let amount = SafeU120::new(amount);
+    //     let new_balance = storage.public_balances.at(to.address).read().add(amount);
+    //     let supply = storage.total_supply.read().add(amount);
+
+    //     storage.public_balances.at(to.address).write(new_balance);
+    //     storage.total_supply.write(supply);
+    // }
 
     #[aztec(public)]
     fn mint_private(amount: Field, secret_hash: Field) {
@@ -269,25 +334,25 @@ contract zkPassportToken {
         storage.public_balances.at(to.address).write(to_balance);
     }
 
-    #[aztec(public)]
-    fn burn_public(from: AztecAddress, amount: Field, nonce: Field) {
-        let slow = SlowMap::at(storage.public_slow_update.read());
-        let from_roles = UserFlags::new(slow.read_at_pub(context, from.address) as u120);
-        assert(!from_roles.is_blacklisted, "Blacklisted: Sender");
+    // #[aztec(public)]
+    // fn burn_public(from: AztecAddress, amount: Field, nonce: Field) {
+    //     let slow = SlowMap::at(storage.public_slow_update.read());
+    //     let from_roles = UserFlags::new(slow.read_at_pub(context, from.address) as u120);
+    //     assert(!from_roles.is_blacklisted, "Blacklisted: Sender");
 
-        if (from.address != context.msg_sender()) {
-            assert_current_call_valid_authwit_public(&mut context, from);
-        } else {
-            assert(nonce == 0, "invalid nonce");
-        }
+    //     if (from.address != context.msg_sender()) {
+    //         assert_current_call_valid_authwit_public(&mut context, from);
+    //     } else {
+    //         assert(nonce == 0, "invalid nonce");
+    //     }
 
-        let amount = SafeU120::new(amount);
-        let from_balance = storage.public_balances.at(from.address).read().sub(amount);
-        storage.public_balances.at(from.address).write(from_balance);
+    //     let amount = SafeU120::new(amount);
+    //     let from_balance = storage.public_balances.at(from.address).read().sub(amount);
+    //     storage.public_balances.at(from.address).write(from_balance);
 
-        let new_supply = storage.total_supply.read().sub(amount);
-        storage.total_supply.write(new_supply);
-    }
+    //     let new_supply = storage.total_supply.read().sub(amount);
+    //     storage.total_supply.write(new_supply);
+    // }
 
     #[aztec(private)]
     fn redeem_shield(to: AztecAddress, amount: Field, secret: Field) {
@@ -309,25 +374,25 @@ contract zkPassportToken {
         storage.balances.at(to).add(SafeU120::new(amount));
     }
 
-    #[aztec(private)]
-    fn unshield(from: AztecAddress, to: AztecAddress, amount: Field, nonce: Field) {
-        let slow = SlowMap::at(AztecAddress::new(storage.slow_update.get_note().value));
-        let from_roles = UserFlags::new(slow.read_at(&mut context, from.address) as u120);
-        assert(!from_roles.is_blacklisted, "Blacklisted: Sender");
-        let to_roles = UserFlags::new(slow.read_at(&mut context, to.address) as u120);
-        assert(!to_roles.is_blacklisted, "Blacklisted: Recipient");
+    // #[aztec(private)]
+    // fn unshield(from: AztecAddress, to: AztecAddress, amount: Field, nonce: Field) {
+    //     let slow = SlowMap::at(AztecAddress::new(storage.slow_update.get_note().value));
+    //     let from_roles = UserFlags::new(slow.read_at(&mut context, from.address) as u120);
+    //     assert(!from_roles.is_blacklisted, "Blacklisted: Sender");
+    //     let to_roles = UserFlags::new(slow.read_at(&mut context, to.address) as u120);
+    //     assert(!to_roles.is_blacklisted, "Blacklisted: Recipient");
 
-        if (from.address != context.msg_sender()) {
-            assert_current_call_valid_authwit(&mut context, from);
-        } else {
-            assert(nonce == 0, "invalid nonce");
-        }
+    //     if (from.address != context.msg_sender()) {
+    //         assert_current_call_valid_authwit(&mut context, from);
+    //     } else {
+    //         assert(nonce == 0, "invalid nonce");
+    //     }
 
-        storage.balances.at(from).sub(SafeU120::new(amount));
+    //     storage.balances.at(from).sub(SafeU120::new(amount));
 
-        let selector = compute_selector("_increase_public_balance((Field),Field)");
-        context.call_public_function(context.this_address(), selector, [to.address, amount]);
-    }
+    //     let selector = compute_selector("_increase_public_balance((Field),Field)");
+    //     context.call_public_function(context.this_address(), selector, [to.address, amount]);
+    // }
 
     #[aztec(private)]
     fn transfer(from: AztecAddress, to: AztecAddress, amount: Field, nonce: Field) {
@@ -355,24 +420,35 @@ contract zkPassportToken {
     }
 
     #[aztec(private)]
-    fn transfer_up_to_threshold_2(from: AztecAddress, to: AztecAddress, amount: Field, nonce: Field) {
+    fn transfer_up_to_threshold_2(
+        from: AztecAddress,
+        to: AztecAddress,
+        amount: Field,
+        nonce: Field)
+    {
         let slow = SlowMap::at(AztecAddress::new(storage.slow_update.get_note().value));
         let threshold_2 = slow.read_at(&mut context, THRESHOLD_2_KEY) as u120;
-        debug_log_format("threshold_2 (transfer_up_to_threshold_2): {0}", [threshold_2 as Field]);
+        debug_log_format("transfer_up_to_threshold_2() threshold_2={0} amount={1}", [threshold_2 as Field, amount]);
 
-        let slow = SlowMap::at(AztecAddress::new(storage.slow_update.get_note().value));
-        let from_roles = UserFlags::new(slow.read_at(&mut context, from.address) as u120);
-        assert(!from_roles.is_blacklisted, "Blacklisted: Sender");
-        let to_roles = UserFlags::new(slow.read_at(&mut context, to.address) as u120);
-        assert(!to_roles.is_blacklisted, "Blacklisted: Recipient");
-
-        if (from.address != context.msg_sender()) {
-            assert_current_call_valid_authwit(&mut context, from);
-        } else {
-            assert(nonce == 0, "invalid nonce");
-        }
+        // let from_roles = UserFlags::new(slow.read_at(&mut context, from.address) as u120);
+        // assert(!from_roles.is_blacklisted, "Blacklisted: Sender");
+        // let to_roles = UserFlags::new(slow.read_at(&mut context, to.address) as u120);
+        // assert(!to_roles.is_blacklisted, "Blacklisted: Recipient");
+        // if (from.address != context.msg_sender()) {
+        //     assert_current_call_valid_authwit(&mut context, from);
+        // } else {
+        //     assert(nonce == 0, "invalid nonce");
+        // }
 
         assert(amount as u120 < threshold_2 as u120, "Threshold amount exceeded!");
+
+        let allowed_cert_pubkeys_mtree_root = slow.read_at(&mut context, ALLOWED_CERT_PUBKEYS_MTREE_ROOT_KEY) as Field;
+        debug_log_format("verify_passport() allowed_cert_pubkeys_mtree_root={0}", [allowed_cert_pubkeys_mtree_root]);
+        let allowed_countries_mtree_root = slow.read_at(&mut context, ALLOWED_COUNTRIES_MTREE_ROOT_KEY) as Field;
+        debug_log_format("verify_passport() allowed_countries_mtree_root={0}", [allowed_countries_mtree_root]);
+
+        // Verify zkPassport with country verification
+        actions::verify_passport(context, allowed_cert_pubkeys_mtree_root, allowed_countries_mtree_root, false);
 
         let amount = SafeU120::new(amount);
         storage.balances.at(from).sub(amount);
@@ -380,22 +456,58 @@ contract zkPassportToken {
     }
 
     #[aztec(private)]
-    fn burn(from: AztecAddress, amount: Field, nonce: Field) {
+    fn transfer_up_to_threshold_3(
+        from: AztecAddress,
+        to: AztecAddress,
+        amount: Field,
+        nonce: Field)
+    {
         let slow = SlowMap::at(AztecAddress::new(storage.slow_update.get_note().value));
-        let from_roles = UserFlags::new(slow.read_at(&mut context, from.address) as u120);
-        assert(!from_roles.is_blacklisted, "Blacklisted: Sender");
+        let threshold_3 = slow.read_at(&mut context, THRESHOLD_3_KEY) as u120;
+        debug_log_format("transfer_up_to_threshold_3() threshold_3={0} amount={1}", [threshold_3 as Field, amount]);
 
-        if (from.address != context.msg_sender()) {
-            assert_current_call_valid_authwit(&mut context, from);
-        } else {
-            assert(nonce == 0, "invalid nonce");
-        }
+        // let from_roles = UserFlags::new(slow.read_at(&mut context, from.address) as u120);
+        // assert(!from_roles.is_blacklisted, "Blacklisted: Sender");
+        // let to_roles = UserFlags::new(slow.read_at(&mut context, to.address) as u120);
+        // assert(!to_roles.is_blacklisted, "Blacklisted: Recipient");
+        // if (from.address != context.msg_sender()) {
+        //     assert_current_call_valid_authwit(&mut context, from);
+        // } else {
+        //     assert(nonce == 0, "invalid nonce");
+        // }
 
-        storage.balances.at(from).sub(SafeU120::new(amount));
+        assert(amount as u120 < threshold_3 as u120, "Threshold amount exceeded!");
 
-        let selector = compute_selector("_reduce_total_supply(Field)");
-        context.call_public_function(context.this_address(), selector, [amount]);
+        let allowed_cert_pubkeys_mtree_root = slow.read_at(&mut context, ALLOWED_CERT_PUBKEYS_MTREE_ROOT_KEY) as Field;
+        debug_log_format("verify_passport() allowed_cert_pubkeys_mtree_root={0}", [allowed_cert_pubkeys_mtree_root]);
+        let allowed_countries_mtree_root = slow.read_at(&mut context, ALLOWED_COUNTRIES_MTREE_ROOT_KEY) as Field;
+        debug_log_format("verify_passport() allowed_countries_mtree_root={0}", [allowed_countries_mtree_root]);
+
+        // Verify zkPassport with country verification and active auth
+        actions::verify_passport(context, allowed_cert_pubkeys_mtree_root, allowed_countries_mtree_root, true);
+
+        let amount = SafeU120::new(amount);
+        storage.balances.at(from).sub(amount);
+        storage.balances.at(to).add(amount);
     }
+
+    // #[aztec(private)]
+    // fn burn(from: AztecAddress, amount: Field, nonce: Field) {
+    //     let slow = SlowMap::at(AztecAddress::new(storage.slow_update.get_note().value));
+    //     let from_roles = UserFlags::new(slow.read_at(&mut context, from.address) as u120);
+    //     assert(!from_roles.is_blacklisted, "Blacklisted: Sender");
+
+    //     if (from.address != context.msg_sender()) {
+    //         assert_current_call_valid_authwit(&mut context, from);
+    //     } else {
+    //         assert(nonce == 0, "invalid nonce");
+    //     }
+
+    //     storage.balances.at(from).sub(SafeU120::new(amount));
+
+    //     let selector = compute_selector("_reduce_total_supply(Field)");
+    //     context.call_public_function(context.this_address(), selector, [amount]);
+    // }
 
     /// Internal ///
 
