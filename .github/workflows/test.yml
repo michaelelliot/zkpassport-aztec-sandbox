@@ -1,0 +1,67 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+
+env:
+  CLI_VERSION: 0.16.9
+  SANDBOX_VERSION: 0.16.9
+
+jobs:
+  unit:
+    name: "Integration tests"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Create docker network
+        run: docker network create aztec_network
+
+      - name: Start ethereum service
+        run: |
+          docker run --rm -d --hostname ethereum --name ethereum \
+          --network=aztec_network \
+          -p 8545:8545 \
+          --entrypoint anvil \
+          ghcr.io/foundry-rs/foundry@sha256:29ba6e34379e79c342ec02d437beb7929c9e254261e8032b17e187be71a2609f \
+          -p 8545 --host 0.0.0.0 --chain-id 31337 --silent
+
+      - name: Start aztec service
+        run: |
+          docker run --rm -d --hostname aztec --name aztec \
+          --network=aztec_network \
+          -p 8079:8079 \
+          -p 8080:8080 \
+          -e DEBUG \
+          -e HOST_WORKDIR=$PWD \
+          -e ETHEREUM_HOST=http://ethereum:8545 \
+          -e CHAIN_ID=31337 \
+          -e ARCHIVER_POLLING_INTERVAL_MS=50 \
+          -e P2P_BLOCK_CHECK_INTERVAL_MS=50 \
+          -e SEQ_TX_POLLING_INTERVAL_MS=50 \
+          -e WS_BLOCK_CHECK_INTERVAL_MS=50 \
+          -e PXE_BLOCK_POLLING_INTERVAL_MS=50 \
+          -e ARCHIVER_VIEM_POLLING_INTERVAL_MS=500 \
+          aztecprotocol/aztec-sandbox:$SANDBOX_VERSION
+
+      - name: Wait for services to start
+        id: wait_for_aztec_service
+        run: |
+          PXE_IP=$(docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' aztec)
+          echo "Waiting for aztec service to start at $PXE_IP..."
+          while ! nc -z $PXE_IP 8080; do
+            sleep 1
+          done
+          echo "PXE_URL=http://$PXE_IP:8080" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Compile contracts
+        run: ./scripts/compile-ci.sh
+
+      - name: Deploy contracts and run tests
+        run: SKIP_COMPILE=1 ./scripts/test.sh
