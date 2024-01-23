@@ -32,6 +32,7 @@ npm run test
 ```
 
 Run integration tests without (re)compiling contracts:
+
 ```bash
 SKIP_COMPILE=1 npm run test
 ```
@@ -54,7 +55,7 @@ npm run clear_cache
 
 ## Reference
 
-###  DG1 TD3 Data Structure
+### DG1 TD3 Data Structure
 
 #### ASN.1 Header
 
@@ -68,24 +69,23 @@ npm run clear_cache
 #### TD3 Data Structure
 
 ```
-------------------------------------------
-	Name of Data Element	        Length
-------------------------------------------
-A	Document code	                2
-B	Issuing State or organization	3
-C	Name of holder	                39
-D	Document number	                9
-E	Check digit — Document number	1
-F	Nationality	                    3
-G	Date of birth	                6
-H	Check digit — Date of birth	    1
-I	Sex	                            1
-J	Date of expiry	                6
-K	Check digit — Date of expiry	1
-L	Optional data	                14
-M	Check digit	                    1
-N	Composite check digit	        1
-------------------------------------------
+    Name of Data Element            Length
+-------------------------------------------
+A   Document code                   2
+B   Issuing State or organization   3
+C   Name of holder                  39
+D   Document number                 9
+E   Check digit — Document number   1
+F   Nationality                     3
+G   Date of birth                   6
+H   Check digit — Date of birth     1
+I   Sex                             1
+J   Date of expiry                  6
+K   Check digit — Date of expiry    1
+L   Optional data                   14
+M   Check digit                     1
+N   Composite check digit           1
+-------------------------------------------
 TD3 length is always 88 bytes
 TD3 looks like this: AABBBCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCDDDDDDDDDEFFFGGGGGGHIJJJJJJKLLLLLLLLLLLLLLMN
 ```
